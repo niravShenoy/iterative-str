@@ -237,86 +237,116 @@ def main_worker(args):
         save=False,
     )
 
+    torch.save(model.state_dict(), "{}/model_{}_init.pt".format(ckpt_base_dir, args.name))
+    torch.save(optimizer.state_dict(), "{}/optimizer_{}.pt".format(ckpt_base_dir, args.name))
+
+    weight_decay = args.weight_decay
     # Start training
-    for epoch in range(args.start_epoch, args.epochs):
-        lr_policy(epoch, iteration=None)
-        cur_lr = get_lr(optimizer)
+    for str_iter in range(args.str_iterations):
+        best_acc1 = 0.0
+        best_acc5 = 0.0
+        best_train_acc1 = 0.0
+        best_train_acc5 = 0.0
+        for epoch in range(args.start_epoch, args.epochs):
+            lr_policy(epoch, iteration=None)
+            cur_lr = get_lr(optimizer)
 
-        # Gradual pruning in GMP experiments
-        if args.conv_type == "GMPConv" and epoch >= args.init_prune_epoch and epoch <= args.final_prune_epoch:
-            total_prune_epochs = args.final_prune_epoch - args.init_prune_epoch + 1
-            for n, m in model.named_modules():
-                if hasattr(m, 'set_curr_prune_rate'):
-                    prune_decay = (1 - ((epoch - args.init_prune_epoch)/total_prune_epochs))**3
-                    curr_prune_rate = m.prune_rate - (m.prune_rate*prune_decay)
-                    m.set_curr_prune_rate(curr_prune_rate)
+            # Gradual pruning in GMP experiments
+            if args.conv_type == "GMPConv" and epoch >= args.init_prune_epoch and epoch <= args.final_prune_epoch:
+                total_prune_epochs = args.final_prune_epoch - args.init_prune_epoch + 1
+                for n, m in model.named_modules():
+                    if hasattr(m, 'set_curr_prune_rate'):
+                        prune_decay = (1 - ((epoch - args.init_prune_epoch)/total_prune_epochs))**3
+                        curr_prune_rate = m.prune_rate - (m.prune_rate*prune_decay)
+                        m.set_curr_prune_rate(curr_prune_rate)
 
-        # train for one epoch
-        start_train = time.time()
-        train_acc1, train_acc5 = train(
-            data.train_loader, model, criterion, optimizer, epoch, args, writer=writer
-        )
-        train_time.update((time.time() - start_train) / 60)
+            # train for one epoch
+            start_train = time.time()
+            train_acc1, train_acc5 = train(
+                data.train_loader, model, criterion, optimizer, epoch, args, writer=writer, prev_epochs=str_iter * (args.epochs - args.start_epoch)
+            )
+            train_time.update((time.time() - start_train) / 60)
 
-        # evaluate on validation set
-        start_validation = time.time()
-        acc1, acc5 = validate(data.val_loader, model, criterion, args, writer, epoch)
-        validation_time.update((time.time() - start_validation) / 60)
+            # evaluate on validation set
+            start_validation = time.time()
+            acc1, acc5 = validate(data.val_loader, model, criterion, args, writer, epoch, prev_epochs=str_iter * (args.epochs - args.start_epoch))
+            validation_time.update((time.time() - start_validation) / 60)
 
-        # remember best acc@1 and save checkpoint
-        is_best = acc1 > best_acc1
-        best_acc1 = max(acc1, best_acc1)
-        best_acc5 = max(acc5, best_acc5)
-        best_train_acc1 = max(train_acc1, best_train_acc1)
-        best_train_acc5 = max(train_acc5, best_train_acc5)
+            # remember best acc@1 and save checkpoint
+            is_best = acc1 > best_acc1
+            best_acc1 = max(acc1, best_acc1)
+            best_acc5 = max(acc5, best_acc5)
+            best_train_acc1 = max(train_acc1, best_train_acc1)
+            best_train_acc5 = max(train_acc5, best_train_acc5)
 
-        save = ((epoch % args.save_every) == 0) and args.save_every > 0
-        if is_best or save or epoch == args.epochs - 1:
-            if is_best:
-                print(f"==> New best, saving at {ckpt_base_dir / 'model_best.pth'}")
+            save = ((epoch % args.save_every) == 0) and args.save_every > 0
+            if is_best or save or (str_iter == args.str_iterations - 1 and epoch == args.epochs - 1):
+                if is_best:
+                    print(f"==> New best, saving at {ckpt_base_dir} / 'model_best_str_iter_{str_iter}.pth'")
 
-            save_checkpoint(
-                {
-                    "epoch": epoch + 1,
-                    "arch": args.arch,
-                    "state_dict": model.state_dict(),
-                    "best_acc1": best_acc1,
-                    "best_acc5": best_acc5,
-                    "best_train_acc1": best_train_acc1,
-                    "best_train_acc5": best_train_acc5,
-                    "optimizer": optimizer.state_dict(),
-                    "curr_acc1": acc1,
-                    "curr_acc5": acc5,
-                },
-                is_best,
-                filename=ckpt_base_dir / f"epoch_{epoch}.state",
-                save=save,
+                save_checkpoint(
+                    {
+                        "str_iteration": str_iter + 1,
+                        "epoch": epoch + 1,
+                        "arch": args.arch,
+                        "state_dict": model.state_dict(),
+                        "best_acc1": best_acc1,
+                        "best_acc5": best_acc5,
+                        "best_train_acc1": best_train_acc1,
+                        "best_train_acc5": best_train_acc5,
+                        "optimizer": optimizer.state_dict(),
+                        "curr_acc1": acc1,
+                        "curr_acc5": acc5,
+                    },
+                    is_best,
+                    filename=ckpt_base_dir / f"str_itr{str_iter + 1}_epoch_{epoch}.state",
+                    save=save,
+                )
+
+            epoch_time.update((time.time() - end_epoch) / 60)
+            progress_overall.display((str_iter * (args.epochs - args.start_epoch) + epoch))
+            progress_overall.write_to_tensorboard(
+                writer, prefix="diagnostics", global_step=(str_iter * (args.epochs - args.start_epoch) + epoch)
             )
 
-        epoch_time.update((time.time() - end_epoch) / 60)
-        progress_overall.display(epoch)
-        progress_overall.write_to_tensorboard(
-            writer, prefix="diagnostics", global_step=epoch
-        )
+            writer.add_scalar("test/lr", cur_lr, (str_iter * (args.epochs - args.start_epoch) + epoch))
+            end_epoch = time.time()
 
-        writer.add_scalar("test/lr", cur_lr, epoch)
-        end_epoch = time.time()
+            # Storing sparsity and threshold statistics for STRConv models
+            if args.conv_type == "STRConv" or args.conv_type == 'STRConvER' or args.conv_type == 'ConvER':
+                count = 0
+                sum_sparse = 0.0
+                for n, m in model.named_modules():
+                    if isinstance(m, (STRConv, STRConvER, ConvER)):
+                        sparsity, total_params, thresh = m.getSparsity()
+                        writer.add_scalar("sparsity/{}".format(n), sparsity, (str_iter * (args.epochs - args.start_epoch) + epoch))
+                        writer.add_scalar("thresh/{}".format(n), thresh, (str_iter * (args.epochs - args.start_epoch) + epoch))
+                        sum_sparse += int(((100 - sparsity) / 100) * total_params)
+                        count += total_params
+                total_sparsity = 100 - (100 * sum_sparse / count)
+                writer.add_scalar("sparsity/total", total_sparsity, (str_iter * (args.epochs - args.start_epoch) + epoch))
+            writer.add_scalar("test/lr", cur_lr, (str_iter * (args.epochs - args.start_epoch) + epoch))
+            end_epoch = time.time()
 
-        # Storing sparsity and threshold statistics for STRConv models
+        # Saving the mask of the model at the end of each STR iteration
+        mask_list = []
         if args.conv_type == "STRConv" or args.conv_type == 'STRConvER' or args.conv_type == 'ConvER':
-            count = 0
-            sum_sparse = 0.0
             for n, m in model.named_modules():
                 if isinstance(m, (STRConv, STRConvER, ConvER)):
-                    sparsity, total_params, thresh = m.getSparsity()
-                    writer.add_scalar("sparsity/{}".format(n), sparsity, epoch)
-                    writer.add_scalar("thresh/{}".format(n), thresh, epoch)
-                    sum_sparse += int(((100 - sparsity) / 100) * total_params)
-                    count += total_params
-            total_sparsity = 100 - (100 * sum_sparse / count)
-            writer.add_scalar("sparsity/total", total_sparsity, epoch)
-        writer.add_scalar("test/lr", cur_lr, epoch)
-        end_epoch = time.time()
+                    mask_list.append(m.getMask())
+        
+        torch.save(mask_list, "{}/mask_{}_iter_{}.pt".format(ckpt_base_dir, args.name, str_iter))
+
+        # Reset weights from the initial model and applying the mask
+        model = apply_pruned_mask(model, mask_list, ckpt_base_dir)
+
+        # Reset the optimizer to the initial state
+        optimizer.load_state_dict(torch.load("{}/optimizer_{}.pt".format(ckpt_base_dir, args.name)))
+
+        # Updating the weight decay for the optimizer before the next STR iteration
+        weight_decay *= args.weight_decay_multiplier
+        optimizer.param_groups[0]['weight_decay'] = weight_decay
+        
 
     write_result_to_csv(
         best_acc1=best_acc1,
@@ -351,19 +381,42 @@ def main_worker(args):
 
 
 def set_gpu(args, model):
+    args.gpu = torch.cuda.current_device()
+    
     if args.gpu is not None:
-        torch.cuda.set_device(args.gpu)
-        model = model.cuda(args.gpu)
+        device = torch.device(args.gpu)
+        model = model.to(device)
     else:
         # DataParallel will divide and allocate batch_size to all available GPUs
         print(f"=> Parallelizing on {args.multigpu} gpus")
-        torch.cuda.set_device(args.multigpu[0])
+        # torch.cuda.set_device(args.multigpu[0])
+        torch.cuda.device(args.multigpu[0])
         args.gpu = args.multigpu[0]
         model = torch.nn.DataParallel(model, device_ids=args.multigpu).cuda(
             args.multigpu[0]
         )
 
     cudnn.benchmark = True
+
+    return model
+
+# Passing Mask List as a parameter, alternative could be to pass the directory and load the mask based on the iteration
+def apply_pruned_mask(model, mask_list, base_dir):
+
+    # Load init model or model at rewind point
+    original_dict = torch.load("{}/model_{}_init.pt".format(base_dir, args.name))
+    original_weights = dict(filter(lambda v: (v[0].endswith(('.weight', '.bias'))), original_dict.items()))
+    model_dict = model.state_dict()
+    model_dict.update(original_weights)
+    model.load_state_dict(model_dict)
+
+    # Apply learned masks to the init model
+    cnt = 0
+    for _, m in model.named_modules():
+        if isinstance(m, (STRConv, STRConvER, ConvER)):
+            # m.sparseThreshold = args.sInit_value    # sInit does not have as big an effect as weight decay
+            m.mask = mask_list[cnt]
+            cnt += 1
 
     return model
 
@@ -539,11 +592,11 @@ def get_directories(args):
     config = pathlib.Path(args.config).stem
     if args.log_dir is None:
         run_base_dir = pathlib.Path(
-            f"runs/{config}/{args.name}/prune_rate={args.prune_rate}"
+            f"runs/{config}/{args.name}/weight_decay={args.weight_decay}"
         )
     else:
         run_base_dir = pathlib.Path(
-            f"{args.log_dir}/{config}/{args.name}/prune_rate={args.prune_rate}"
+            f"{args.log_dir}/{config}/{args.name}/weight_decay={args.weight_decay}"
         )
     if args.width_mult != 1.0:
         run_base_dir = run_base_dir / "width_mult={}".format(str(args.width_mult))

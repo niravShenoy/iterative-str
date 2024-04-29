@@ -45,7 +45,12 @@ class STRConv(nn.Conv2d):
         temp = sparseWeight.detach().cpu()
         temp[temp!=0] = 1
         return (100 - temp.mean().item()*100), temp.numel(), f(self.sparseThreshold).item()
-
+    
+    def getMask(self, f=torch.sigmoid):
+        sparseWeight = sparseFunction(self.weight, self.sparseThreshold,  self.activation, self.f)
+        temp = sparseWeight.detach().cpu()
+        temp[temp!=0] = 1
+        return temp
 
 class STRConvER(nn.Conv2d):
     def __init__(self, *args, **kwargs):
@@ -77,6 +82,12 @@ class STRConvER(nn.Conv2d):
         temp = self.mask * sparseWeight.detach().cpu()
         temp[temp!=0] = 1
         return (100 - temp.mean().item()*100), temp.numel(), f(self.sparseThreshold).item()
+    
+    def getMask(self, f=torch.sigmoid):
+        sparseWeight = sparseFunction(self.weight, self.sparseThreshold,  self.activation, self.f)
+        temp = self.mask * sparseWeight.detach().cpu()
+        temp[temp!=0] = 1
+        return temp
 
 
 class ConvER(nn.Conv2d):
@@ -103,6 +114,12 @@ class ConvER(nn.Conv2d):
         temp = sparseWeight.detach().cpu()
         temp[temp!=0] = 1
         return (100 - temp.mean().item()*100), temp.numel(), 0
+    
+    def getMask(self, f=torch.sigmoid):
+        sparseWeight = sparseFunction(self.weight, self.sparseThreshold,  self.activation, self.f)
+        temp = self.mask * sparseWeight.detach().cpu()
+        temp[temp!=0] = 1
+        return temp
 
 class ChooseEdges(autograd.Function):
     @staticmethod

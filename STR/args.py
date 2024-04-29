@@ -41,6 +41,13 @@ def parse_arguments():
         help="number of total epochs to run",
     )
     parser.add_argument(
+        "--str_iterations",
+        default=1,
+        type=int,
+        metavar="N",
+        help="number of total STR iterations to run",
+    )
+    parser.add_argument(
         "--start-epoch",
         default=None,
         type=int,
@@ -252,6 +259,9 @@ def parse_arguments():
     )
     parser.add_argument(
         "--ignore-pretrained-weights", action="store_true", help="ignore the weights of a pretrained model."
+    )
+    parser.add_argument(
+        "--weight-decay-multiplier", type=float, default=1.0, help="Factor by which weight decay is multiplied every STR iteration"
     )
 
     args = parser.parse_args()

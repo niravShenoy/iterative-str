@@ -9,7 +9,7 @@ from utils.logging import AverageMeter, ProgressMeter
 __all__ = ["train", "validate"]
 
 
-def train(train_loader, model, criterion, optimizer, epoch, args, writer):
+def train(train_loader, model, criterion, optimizer, epoch, args, writer, prev_epochs=0):
     batch_time = AverageMeter("Time", ":6.3f")
     data_time = AverageMeter("Data", ":6.3f")
     losses = AverageMeter("Loss", ":.3f")
@@ -18,7 +18,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args, writer):
     progress = ProgressMeter(
         len(train_loader),
         [batch_time, data_time, losses, top1, top5],
-        prefix=f"Epoch: [{epoch}]",
+        prefix=f"Epoch: [{prev_epochs + epoch}]",
     )
 
     # switch to train mode
@@ -59,14 +59,14 @@ def train(train_loader, model, criterion, optimizer, epoch, args, writer):
         end = time.time()
 
         if i % args.print_freq == 0:
-            t = (num_batches * epoch + i) * batch_size
+            t = (num_batches * (prev_epochs + epoch) + i) * batch_size
             progress.display(i)
             progress.write_to_tensorboard(writer, prefix="train", global_step=t)
 
     return top1.avg, top5.avg
 
 
-def validate(val_loader, model, criterion, args, writer, epoch):
+def validate(val_loader, model, criterion, args, writer, epoch, prev_epochs=0):
     batch_time = AverageMeter("Time", ":6.3f", write_val=False)
     losses = AverageMeter("Loss", ":.3f", write_val=False)
     top1 = AverageMeter("Acc@1", ":6.2f", write_val=False)
@@ -109,7 +109,7 @@ def validate(val_loader, model, criterion, args, writer, epoch):
         progress.display(len(val_loader))
 
         if writer is not None:
-            progress.write_to_tensorboard(writer, prefix="test", global_step=epoch)
+            progress.write_to_tensorboard(writer, prefix="test", global_step=prev_epochs + epoch)
 
     return top1.avg, top5.avg
 
