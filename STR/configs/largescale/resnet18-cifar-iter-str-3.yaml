@@ -1,0 +1,38 @@
+# config to get 90.23% sparse ResNet50 on ImageNet. Modify this file to get other sparse models.
+# Architecture
+# arch: ResNet50
+
+# ===== Dataset ===== #
+# data: /mnt/data/
+set: cifar10
+name: cifar_0.3_ER_balanced_STR_Iter_01
+
+# ===== Learning Rate Policy ======== #
+optimizer: sgd
+lr: 0.1
+lr_policy: cosine_lr
+warmup_length: 5
+
+# ===== Network training config ===== #
+str_iterations: 3
+epochs: 100
+weight_decay: 0.0004 # Change this according to reported numbers in appendix
+weight_decay_multiplier: 1.55
+momentum: 0.9
+batch_size: 256
+label_smoothing: 0.1
+
+# ===== Sparsity =========== #
+er_sparse_init: 0.3
+er_sparse_method: balanced
+# er_sparsity_file: ER_STR_cifar_0.3_ERK_2.json
+conv_type: STRConvER
+bn_type: LearnedBatchNorm
+init: kaiming_normal
+mode: fan_in
+nonlinearity: relu
+sparse_function: sigmoid
+sInit_value: -200 # Change this according to reported numbers in appendix
+
+# ===== Hardware setup ===== #
+workers: 4
