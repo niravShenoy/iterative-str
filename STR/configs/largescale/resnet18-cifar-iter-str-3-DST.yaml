@@ -5,7 +5,8 @@
 # ===== Dataset ===== #
 # data: /mnt/data/
 set: cifar10
-name: cifar_0.3_ER_balanced_STR_Iter_01
+resnet_type: small-dense
+name: cifar10_resnet18_balanced_STR_Iter_LRR
 
 # ===== Learning Rate Policy ======== #
 optimizer: sgd
@@ -14,18 +15,18 @@ lr_policy: cosine_lr
 warmup_length: 5
 
 # ===== Network training config ===== #
-str_iterations: 3
-epochs: 100
+str_iterations: 2
+epochs: 150
 weight_decay: 0.0003 # Change this according to reported numbers in appendix
 weight_decay_multiplier: 1.75
 momentum: 0.9
 batch_size: 256
 label_smoothing: 0.1
+lr_rewind: True
 
 # ===== Sparsity =========== #
-er_sparse_init: 0.3
+er_sparse_init: 0.1
 er_sparse_method: balanced
-# er_sparsity_file: ER_STR_cifar_0.3_ERK_2.json
 conv_type: STRConvER
 bn_type: LearnedBatchNorm
 init: kaiming_normal
@@ -33,6 +34,16 @@ mode: fan_in
 nonlinearity: relu
 sparse_function: sigmoid
 sInit_value: -200 # Change this according to reported numbers in appendix
+
+# ====== GraNet ============ #
+dst_method: prune_and_grow
+dst_init_prune_epoch: 70
+dst_final_prune_epoch: 100
+dst_prune_const: True
+dst_const_prune_rate: 0.2
+update_frequency: 1
+# final_density: 0.095  # Not needed as we are only regenerating
+
 
 # ===== Hardware setup ===== #
 workers: 4

@@ -83,6 +83,11 @@ class STRConvER(nn.Conv2d):
         temp[temp!=0] = 1
         return (100 - temp.mean().item()*100), temp.numel(), f(self.sparseThreshold).item()
     
+    def getMaskSparsity(self):
+        temp = self.mask.detach().cpu()
+        temp[temp!=0] = 1
+        return (100 - temp.mean().item()*100), temp.numel()
+    
     def getMask(self, f=torch.sigmoid):
         sparseWeight = sparseFunction(self.weight, self.sparseThreshold,  self.activation, self.f)
         temp = self.mask * sparseWeight.detach().cpu()
