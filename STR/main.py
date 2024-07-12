@@ -28,6 +28,8 @@ import data
 from data import cifar10
 import models
 from models import resnet18
+from models import resnet20
+from models import resnet
 
 
 def main():
@@ -52,9 +54,39 @@ def main_worker(args):
     # create model and optimizer
     # model = get_model(args)
     if args.set == 'cifar10':
-        model = resnet18.ResNet18([3, 32, 32], num_classes=10)
+        if args.resnet_type == 'small-dense':
+            model = resnet18.ResNetWidth18([3, 32, 32], num_classes=10, width=args.width)
+        elif args.resnet_type == 'res20':
+            model = resnet20.ResNet20([3, 32, 32], num_classes=10)
+            print(model)
+        elif args.resnet_type == 'resnet20-width':
+            model = resnet20.ResNetWidth20([3, 32, 32], width=args.width, num_classes=10)
+            print(model)
+        else:
+            model = resnet18.ResNet18([3, 32, 32], num_classes=10)
     if args.set == 'cifar100':
-        model = resnet18.ResNet50([3, 32, 32], num_classes=100)
+        if args.resnet_type == 'small-dense':
+            model = resnet18.ResNetWidth18([3, 32, 32], num_classes=100, width=args.width)
+        elif args.resnet_type == 'res50':
+            model = resnet18.ResNet50([3, 32, 32], num_classes=100)
+        else:
+            model = model = resnet18.ResNet18([3, 32, 32], num_classes=100)
+
+    if args.set == 'tiny-imagenet':
+        if args.resnet_type == 'res18':
+            model = resnet.ResNet18(num_classes=200)
+        elif args.resnet_type == 'small-dense-inc':
+            model = resnet.ResNetWidth50Inc(width=args.width, num_classes=200)
+        else:
+            model = resnet.ResNet50(num_classes=200)
+
+    if args.set == 'imagenet':
+        if args.resnet_type == 'small-dense-inc':
+            model = resnet.ResNetWidth50Inc(width=args.width, num_classes=1000)
+        elif args.resnet_type == 'res18':
+            model = resnet.ResNet18(num_classes=1000)
+        else:
+            model = resnet.ResNet50()
 
     if args.er_sparse_method == 'uniform':
         for n, m in model.named_modules():
@@ -262,14 +294,15 @@ def main_worker(args):
 
             # train for one epoch
             start_train = time.time()
+            prev_epochs = str_iter * (args.epochs - args.start_epoch)
             train_acc1, train_acc5 = train(
-                data.train_loader, model, criterion, optimizer, epoch, args, writer=writer, prev_epochs=str_iter * (args.epochs - args.start_epoch)
+                data.train_loader, model, criterion, optimizer, epoch, args, writer=writer, prev_epochs=prev_epochs
             )
             train_time.update((time.time() - start_train) / 60)
 
             # evaluate on validation set
             start_validation = time.time()
-            acc1, acc5 = validate(data.val_loader, model, criterion, args, writer, epoch, prev_epochs=str_iter * (args.epochs - args.start_epoch))
+            acc1, acc5 = validate(data.val_loader, model, criterion, args, writer, epoch, prev_epochs=prev_epochs)
             validation_time.update((time.time() - start_validation) / 60)
 
             # remember best acc@1 and save checkpoint
@@ -353,7 +386,7 @@ def main_worker(args):
         best_acc5=best_acc5,
         best_train_acc1=best_train_acc1,
         best_train_acc5=best_train_acc5,
-        prune_rate=args.prune_rate,
+        prune_rate=args.er_sparse_init,
         curr_acc1=acc1,
         curr_acc5=acc5,
         base_config=args.config,
@@ -403,12 +436,13 @@ def set_gpu(args, model):
 # Passing Mask List as a parameter, alternative could be to pass the directory and load the mask based on the iteration
 def apply_pruned_mask(model, mask_list, base_dir):
 
-    # Load init model or model at rewind point
-    original_dict = torch.load("{}/model_{}_init.pt".format(base_dir, args.name))
-    original_weights = dict(filter(lambda v: (v[0].endswith(('.weight', '.bias'))), original_dict.items()))
-    model_dict = model.state_dict()
-    model_dict.update(original_weights)
-    model.load_state_dict(model_dict)
+    # If not LRR, load init model or model at rewind point; else only rewind LR schedule
+    if not args.lr_rewind:
+        original_dict = torch.load("{}/model_{}_init.pt".format(base_dir, args.name))
+        original_weights = dict(filter(lambda v: (v[0].endswith(('.weight', '.bias'))), original_dict.items()))
+        model_dict = model.state_dict()
+        model_dict.update(original_weights)
+        model.load_state_dict(model_dict)
 
     # Apply learned masks to the init model
     cnt = 0
@@ -612,7 +646,10 @@ def get_directories(args):
     ckpt_base_dir = run_base_dir / "checkpoints"
 
     if not run_base_dir.exists():
-        os.makedirs(run_base_dir)
+        try:
+            os.makedirs(run_base_dir)
+        except Exception as e:
+            print(f"Error creating directory: {e}")
 
     (run_base_dir / "settings.txt").write_text(str(args))
 

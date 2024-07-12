@@ -26,6 +26,18 @@ def parse_arguments():
         "--log-dir", help="Where to save the runs. If None use ./runs", default=None
     )
     parser.add_argument(
+        "--resnet-type", 
+        type=str, 
+        default='small-dense', 
+        help="resnet-width"
+    )
+    parser.add_argument(
+        "--width", 
+        type=int, 
+        default=64, 
+        help="width resnet small dense"
+    )
+    parser.add_argument(
         "-j",
         "--workers",
         default=20,
@@ -74,13 +86,13 @@ def parse_arguments():
         dest="lr",
     )
     parser.add_argument(
-        "--warmup_length", default=0, type=int, help="Number of warmup iterations"
+        "--warmup-length", default=0, type=int, help="Number of warmup iterations"
     )
     parser.add_argument(
-        "--init_prune_epoch", default=0, type=int, help="Init epoch for pruning in GMP"
+        "--init-prune-epoch", default=0, type=int, help="Init epoch for pruning in GMP"
     )
     parser.add_argument(
-        "--final_prune_epoch", default=-100, type=int, help="Final epoch for pruning in GMP"
+        "--final-prune-epoch", default=-100, type=int, help="Final epoch for pruning in GMP"
     )
     parser.add_argument(
         "--momentum", default=0.9, type=float, metavar="M", help="momentum"
@@ -263,6 +275,34 @@ def parse_arguments():
     parser.add_argument(
         "--weight-decay-multiplier", type=float, default=1.0, help="Factor by which weight decay is multiplied every STR iteration"
     )
+    parser.add_argument(
+        "--dst-method", type=str, default='None', help="method to use for DST (GraNet, prune_and_grow)"
+    )
+    parser.add_argument(
+        "--dst-init-prune-epoch", default=0, type=int, help="Init epoch for DST"
+    )
+    parser.add_argument(
+        "--dst-final-prune-epoch", default=-100, type=int, help="Final epoch for DST"
+    )
+    parser.add_argument(
+        "--dst-prune-const", action="store_true", default=False, help="Constant pruning rate for DST"
+    )
+    parser.add_argument(
+        "--dst-const-prune-rate", type=float, default=0.2, help="Factor of non-zero weights to prune in DST (GraNet or prune_and_grow)"
+    )
+    parser.add_argument(
+        "--update-frequency", type=int, default=5, help="Frequency of performing DST (epochs)"
+    )
+    parser.add_argument(
+        "--lr-rewind", action="store_true", default=False, help="If True, only rewind LR; if False, rewind LR and weights"
+    )
+    # parser.add_argument(
+    #     "--init-density", type=float, default=0.5, help="Initial density of the network"
+    # )    # Removed as it is redundant with er-sparse-init
+    parser.add_argument(
+        "--final-density", type=float, default=0.05, help="Expected final density of the network"
+    )
+
 
     args = parser.parse_args()
 
