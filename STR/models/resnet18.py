@@ -185,10 +185,10 @@ class ResNetWidth(nn.Module):
         
         self.bn1 = builder.batchnorm(width)
         self.layer1 = self._make_layer(builder, block, width, num_blocks[0], stride=1)
-        self.layer2 = self._make_layer(builder, block, width, num_blocks[1], stride=2)
-        self.layer3 = self._make_layer(builder, block, width, num_blocks[2], stride=2)
-        self.layer4 = self._make_layer(builder, block, width, num_blocks[3], stride=2)
-        self.linear = builder.conv1x1(width*block.expansion, num_classes)
+        self.layer2 = self._make_layer(builder, block, 2*width, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(builder, block, 4*width, num_blocks[2], stride=2)
+        self.layer4 = self._make_layer(builder, block, 8*width, num_blocks[3], stride=2)
+        self.linear = builder.conv1x1(8*width*block.expansion, num_classes)
 
     def _make_layer(self, builder, block, planes, num_blocks, stride):
         
