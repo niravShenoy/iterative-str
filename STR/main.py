@@ -19,7 +19,7 @@ from utils.logging import AverageMeter, ProgressMeter
 from utils.net_utils import save_checkpoint, get_lr, LabelSmoothing
 from utils.schedulers import get_policy
 from utils.conv_type import STRConv, STRConvER, ConvER
-from utils.conv_type import sparseFunction
+# from utils.conv_type import sparseFunction
 
 from args import args
 from trainer import train, validate
@@ -70,7 +70,7 @@ def main_worker(args):
         elif args.resnet_type == 'res50':
             model = resnet18.ResNet50([3, 32, 32], num_classes=100)
         else:
-            model = model = resnet18.ResNet18([3, 32, 32], num_classes=100)
+            model = resnet18.ResNet18([3, 32, 32], num_classes=100)
 
     if args.set == 'tiny-imagenet':
         if args.resnet_type == 'res18':
@@ -332,8 +332,9 @@ def main_worker(args):
                         "curr_acc5": acc5,
                     },
                     is_best,
-                    filename=ckpt_base_dir / f"str_itr{str_iter + 1}_epoch_{epoch}.state",
+                    filename=os.path.join(ckpt_base_dir, f"model_str_itr{str_iter + 1}_epoch_{epoch}.state"),
                     save=save,
+                    str_iter=str_iter,
                 )
 
             epoch_time.update((time.time() - end_epoch) / 60)
@@ -342,8 +343,8 @@ def main_worker(args):
                 writer, prefix="diagnostics", global_step=(str_iter * (args.epochs - args.start_epoch) + epoch)
             )
 
-            writer.add_scalar("test/lr", cur_lr, (str_iter * (args.epochs - args.start_epoch) + epoch))
-            end_epoch = time.time()
+            # writer.add_scalar("test/lr", cur_lr, (str_iter * (args.epochs - args.start_epoch) + epoch))
+            # end_epoch = time.time()
 
             # Storing sparsity and threshold statistics for STRConv models
             if args.conv_type == "STRConv" or args.conv_type == 'STRConvER' or args.conv_type == 'ConvER':
@@ -351,13 +352,18 @@ def main_worker(args):
                 sum_sparse = 0.0
                 for n, m in model.named_modules():
                     if isinstance(m, (STRConv, STRConvER, ConvER)):
-                        sparsity, total_params, thresh = m.getSparsity()
+                        sparsity, num_nonzero, thresh = m.getSparsity()
                         writer.add_scalar("sparsity/{}".format(n), sparsity, (str_iter * (args.epochs - args.start_epoch) + epoch))
                         writer.add_scalar("thresh/{}".format(n), thresh, (str_iter * (args.epochs - args.start_epoch) + epoch))
-                        sum_sparse += int(((100 - sparsity) / 100) * total_params)
-                        count += total_params
+                        sum_sparse += num_nonzero
+                        count += m.weight.numel()
                 total_sparsity = 100 - (100 * sum_sparse / count)
+                if args.weights_sparsity_plot:
+                    weight_square_sum = analyze_weights_sparsity(model)
+                    writer.add_scalar("sparsity/weight_vs_sparsity", weight_square_sum, (str_iter * (args.epochs - args.start_epoch) + epoch))
+   
                 writer.add_scalar("sparsity/total", total_sparsity, (str_iter * (args.epochs - args.start_epoch) + epoch))
+
             writer.add_scalar("test/lr", cur_lr, (str_iter * (args.epochs - args.start_epoch) + epoch))
             end_epoch = time.time()
 
@@ -399,8 +405,8 @@ def main_worker(args):
             if isinstance(m, (STRConv, STRConvER)):
                 sparsity = m.getSparsity()
                 json_data[n] = sparsity[0]
-                sum_sparse += int(((100 - sparsity[0]) / 100) * sparsity[1])
-                count += sparsity[1]
+                sum_sparse += sparsity[1]
+                count += m.weight.numel()
                 json_thres[n] = sparsity[2]
         json_data["total"] = 100 - (100 * sum_sparse / count)
         if not os.path.exists("runs/layerwise_sparsity"):
@@ -447,12 +453,23 @@ def apply_pruned_mask(model, mask_list, base_dir):
     # Apply learned masks to the init model
     cnt = 0
     for _, m in model.named_modules():
-        if isinstance(m, (STRConv, STRConvER, ConvER)):
+        if isinstance(m, (STRConvER)):
             # m.sparseThreshold = args.sInit_value    # sInit does not have as big an effect as weight decay
-            m.mask = mask_list[cnt]
+            m.er_mask = mask_list[cnt]
             cnt += 1
 
     return model
+
+def analyze_weights_sparsity(model):
+    weight_squares = []
+    for n, m in model.named_modules():
+        if isinstance(m, (STRConv, STRConvER, ConvER)):
+            weight = m.weight
+            weight_square = torch.sum(weight ** 2)
+            weight_squares.append(weight_square)
+
+    weight_square = sum(weight_squares)
+    return weight_square
 
 
 def resume(args, model, optimizer):
@@ -476,6 +493,8 @@ def resume(args, model, optimizer):
     else:
         print(f"=> No checkpoint found at '{args.resume}'")
 
+def sparseFunction(x, s, activation=torch.relu, f=torch.sigmoid):
+    return torch.sign(x)*activation(torch.abs(x)-f(s))
 
 def pretrained(args, model):
     if os.path.isfile(args.pretrained):

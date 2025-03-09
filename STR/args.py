@@ -302,6 +302,15 @@ def parse_arguments():
     parser.add_argument(
         "--final-density", type=float, default=0.05, help="Expected final density of the network"
     )
+    parser.add_argument(
+        "--weights-sparsity-plot", action="store_true", default=False, help="If True, creates a plot of squared weights vs sparsity"
+    )
+    parser.add_argument(
+        "--is-update-pruned-weights", action="store_true", default=False, help="Update pruned weights with values that don't cross the threshold"
+    )
+    parser.add_argument(
+        "--is-reinitialze-grown-weights", action="store_true", default=False, help="Reinitialize regrown weights with the average of all weights crossing the threshold"
+    )
 
 
     args = parser.parse_args()

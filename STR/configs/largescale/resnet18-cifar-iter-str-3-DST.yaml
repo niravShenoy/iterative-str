@@ -15,17 +15,18 @@ lr_policy: cosine_lr
 warmup_length: 5
 
 # ===== Network training config ===== #
-str_iterations: 2
-epochs: 150
+str_iterations: 3
+epochs: 100
 weight_decay: 0.0003 # Change this according to reported numbers in appendix
 weight_decay_multiplier: 1.75
 momentum: 0.9
 batch_size: 256
 label_smoothing: 0.1
 lr_rewind: True
+weights_sparsity_plot: True
 
 # ===== Sparsity =========== #
-er_sparse_init: 0.1
+er_sparse_init: 0.3
 er_sparse_method: balanced
 conv_type: STRConvER
 bn_type: LearnedBatchNorm
@@ -36,12 +37,14 @@ sparse_function: sigmoid
 sInit_value: -200 # Change this according to reported numbers in appendix
 
 # ====== GraNet ============ #
-dst_method: prune_and_grow
+dst_method: None
 dst_init_prune_epoch: 70
 dst_final_prune_epoch: 100
 dst_prune_const: True
 dst_const_prune_rate: 0.2
 update_frequency: 1
+is_reinitialze_grown_weights: True
+is_update_pruned_weights: True
 # final_density: 0.095  # Not needed as we are only regenerating
 
 

@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 
-def save_checkpoint(state, is_best, filename="checkpoint.pth", save=False):
+def save_checkpoint(state, is_best, filename="checkpoint.pth", save=False, str_iter=None):
     filename = pathlib.Path(filename)
 
     if not filename.parent.exists():
@@ -17,7 +17,10 @@ def save_checkpoint(state, is_best, filename="checkpoint.pth", save=False):
     torch.save(state, filename)
 
     if is_best:
-        shutil.copyfile(filename, str(filename.parent / "model_best.pth"))
+        if str_iter is None:
+            shutil.copyfile(filename, str(filename.parent / "model_best.pth"))
+        else:
+            shutil.copyfile(filename, str(filename.parent / f"model_best_str_iter_{str_iter+1}.pth"))
 
         if not save:
             os.remove(filename)
