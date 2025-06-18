@@ -6,7 +6,7 @@
 # data: /mnt/data/
 set: cifar10
 resnet_type: small-dense
-name: cifar10_resnet18_balanced_STR_Iter_LRR
+name: cifar10_resnet18_balanced_STR_Iter_LRR_DST
 
 # ===== Learning Rate Policy ======== #
 optimizer: sgd
@@ -37,7 +37,7 @@ sparse_function: sigmoid
 sInit_value: -200 # Change this according to reported numbers in appendix
 
 # ====== GraNet ============ #
-dst_method: None
+dst_method: prune_and_grow
 dst_init_prune_epoch: 70
 dst_final_prune_epoch: 100
 dst_prune_const: True

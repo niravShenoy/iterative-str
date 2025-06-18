@@ -311,6 +311,12 @@ def parse_arguments():
     parser.add_argument(
         "--is-reinitialze-grown-weights", action="store_true", default=False, help="Reinitialize regrown weights with the average of all weights crossing the threshold"
     )
+    parser.add_argument(
+        "--distributed", action="store_true", default=False, help="Set FFCV Data Loader to distributed mode"
+    )
+    parser.add_argument(
+        "--subsample-frac", type=float, default=0.1, help="Fraction of dataset to use for FFCV Data Loader (default: 0.1)"
+    )
 
 
     args = parser.parse_args()

@@ -5,17 +5,18 @@
 # ===== Dataset ===== #
 # data: /mnt/data/
 set: cifar10
-name: cifar_0.3_ER_balanced_STR_Iter_01
+resnet_type: small-dense
+name: cifar10_resnet18_balanced_STR_Iter_LRR
 
 # ===== Learning Rate Policy ======== #
 optimizer: sgd
-lr: 0.1
-lr_policy: cosine_lr
+lr: 0.01
+lr_policy: constant_lr
 warmup_length: 5
 
 # ===== Network training config ===== #
 str_iterations: 3
-epochs: 100
+epochs: 200
 weight_decay: 0.0003 # Change this according to reported numbers in appendix
 weight_decay_multiplier: 1.75
 momentum: 0.9
