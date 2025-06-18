@@ -25,7 +25,7 @@ from args import args
 from trainer import train, validate
 
 import data
-from data import cifar10
+from data import cifar10, imagenet_ffcv
 import models
 from models import resnet18
 from models import resnet20
@@ -86,7 +86,7 @@ def main_worker(args):
         elif args.resnet_type == 'res18':
             model = resnet.ResNet18(num_classes=1000)
         else:
-            model = resnet.ResNet50()
+            model = resnet18.ResNet50([3, 32, 32], num_classes=1000)
 
     if args.er_sparse_method == 'uniform':
         for n, m in model.named_modules():
@@ -213,8 +213,15 @@ def main_worker(args):
     # data = get_dataset(args)
     if args.set == 'cifar10':  
         data = cifar10.CIFAR10(args)
-    if args.set == 'cifar100':
+    elif args.set == 'cifar100':
         data = cifar10.CIFAR100(args)
+    elif args.set == 'imagenet':
+        data = imagenet_ffcv.ImageNetFFCV(args)
+    elif args.set == 'imagenet-subsampled':
+        data = imagenet_ffcv.imagenet_subsampled(args)
+    else:
+        data = cifar10.CIFAR10(args)
+
 
     lr_policy = get_policy(args.lr_policy)(optimizer, args)
 
@@ -279,6 +286,7 @@ def main_worker(args):
         best_acc5 = 0.0
         best_train_acc1 = 0.0
         best_train_acc5 = 0.0
+        total_sparsity = 0.0
         for epoch in range(args.start_epoch, args.epochs):
             lr_policy(epoch, iteration=None)
             cur_lr = get_lr(optimizer)
@@ -313,29 +321,6 @@ def main_worker(args):
             best_train_acc5 = max(train_acc5, best_train_acc5)
 
             save = ((epoch % args.save_every) == 0) and args.save_every > 0
-            if is_best or save or (str_iter == args.str_iterations - 1 and epoch == args.epochs - 1):
-                if is_best:
-                    print(f"==> New best, saving at {ckpt_base_dir} / 'model_best_str_iter_{str_iter}.pth'")
-
-                save_checkpoint(
-                    {
-                        "str_iteration": str_iter + 1,
-                        "epoch": epoch + 1,
-                        "arch": args.arch,
-                        "state_dict": model.state_dict(),
-                        "best_acc1": best_acc1,
-                        "best_acc5": best_acc5,
-                        "best_train_acc1": best_train_acc1,
-                        "best_train_acc5": best_train_acc5,
-                        "optimizer": optimizer.state_dict(),
-                        "curr_acc1": acc1,
-                        "curr_acc5": acc5,
-                    },
-                    is_best,
-                    filename=os.path.join(ckpt_base_dir, f"model_str_itr{str_iter + 1}_epoch_{epoch}.state"),
-                    save=save,
-                    str_iter=str_iter,
-                )
 
             epoch_time.update((time.time() - end_epoch) / 60)
             progress_overall.display((str_iter * (args.epochs - args.start_epoch) + epoch))
@@ -363,6 +348,31 @@ def main_worker(args):
                     writer.add_scalar("sparsity/weight_vs_sparsity", weight_square_sum, (str_iter * (args.epochs - args.start_epoch) + epoch))
    
                 writer.add_scalar("sparsity/total", total_sparsity, (str_iter * (args.epochs - args.start_epoch) + epoch))
+
+            if is_best or save or (str_iter == args.str_iterations - 1 and epoch == args.epochs - 1):
+                if is_best:
+                    print(f"==> New best, saving at {ckpt_base_dir} / 'model_best_str_iter_{str_iter}.pth'")
+                    print(f"Accuracy: {acc1:.2f}, Sparsity: {total_sparsity:.2f}")
+
+                save_checkpoint(
+                    {
+                        "str_iteration": str_iter + 1,
+                        "epoch": epoch + 1,
+                        "arch": args.arch,
+                        "state_dict": model.state_dict(),
+                        "best_acc1": best_acc1,
+                        "best_acc5": best_acc5,
+                        "best_train_acc1": best_train_acc1,
+                        "best_train_acc5": best_train_acc5,
+                        "optimizer": optimizer.state_dict(),
+                        "curr_acc1": acc1,
+                        "curr_acc5": acc5,
+                    },
+                    is_best,
+                    filename=os.path.join(ckpt_base_dir, f"model_str_itr{str_iter + 1}_epoch_{epoch}.state"),
+                    save=save,
+                    str_iter=str_iter,
+                )
 
             writer.add_scalar("test/lr", cur_lr, (str_iter * (args.epochs - args.start_epoch) + epoch))
             end_epoch = time.time()

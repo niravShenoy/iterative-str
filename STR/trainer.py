@@ -244,8 +244,9 @@ def reinitialize_weights(layer, mask):
         dynamic_growth_mask_gpu]
 
     active_non_zero = active_weight_magnitude[active_weights != 0]
-    avg_mag = active_non_zero.abs().mean() if len(active_non_zero) > 0 else (torch.sigmoid(layer.sparseThreshold) + 0.01).to(device)
-    
+    avg_mag = active_non_zero.abs().mean() if len(active_non_zero) > 0 else (
+        torch.sigmoid(layer.sparseThreshold) + 0.01).to(device)
+
     # Determine signs from gradients
     grad_signs = -torch.sign(layer.weight.grad[mask]).to(device)
     
