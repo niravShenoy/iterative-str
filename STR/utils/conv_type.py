@@ -55,49 +55,6 @@ class STRConv(nn.Conv2d):
     def sparseFunction(self, x, s, activation=torch.relu, f=torch.sigmoid):
         return torch.sign(x)* activation(torch.abs(x)-f(s))
 
-# class STRConvER(nn.Conv2d):
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-
-#         self.activation = torch.relu
-#         self.mask = torch.zeros_like(self.weight).bernoulli_(p=parser_args.er_sparse_init)
-#         if parser_args.sparse_function == 'sigmoid':
-#             self.f = torch.sigmoid
-#             self.sparseThreshold = nn.Parameter(initialize_sInit())
-#         else:
-#             self.sparseThreshold = nn.Parameter(initialize_sInit())
-        
-#     def forward(self, x):
-#         # In case STR is not training for the hyperparameters given in the paper, change sparseWeight to self.sparseWeight if it is a problem of backprop.
-#         # However, that should not be the case according to graph computation.
-#         sparseWeight = sparseFunction(self.weight, self.sparseThreshold, self.activation, self.f)
-#         sparseWeight = self.mask.to(sparseWeight.device) * sparseWeight
-#         # sparseWeight = MaskApply.apply(sparseWeight, self.mask.to(sparseWeight.device))
-#         x = F.conv2d(
-#             x, sparseWeight, self.bias, self.stride, self.padding, self.dilation, self.groups
-#         )
-#         return x
-    
-#     def set_er_mask(self, p):
-#         self.mask = torch.zeros_like(self.weight).bernoulli_(p)
-
-#     def getSparsity(self, f=torch.sigmoid):
-#         sparseWeight = sparseFunction(self.weight, self.sparseThreshold,  self.activation, self.f)
-#         temp = self.mask * sparseWeight.detach().cpu()
-#         temp[temp!=0] = 1
-#         return (100 - temp.mean().item()*100), temp.numel(), f(self.sparseThreshold).item()
-    
-#     def getMaskSparsity(self):
-#         temp = self.mask.detach().cpu()
-#         temp[temp!=0] = 1
-#         return (100 - temp.mean().item()*100), temp.numel()
-    
-#     def getMask(self, f=torch.sigmoid):
-#         sparseWeight = sparseFunction(self.weight, self.sparseThreshold,  self.activation, self.f)
-#         temp = self.mask * sparseWeight.detach().cpu()
-#         temp[temp!=0] = 1
-#         return temp
-
 class STRConvER(nn.Conv2d):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -125,7 +82,7 @@ class STRConvER(nn.Conv2d):
         
         # Apply STR and masking
         sparse_weight = self.sparseFunction(self.weight, self.sparseThreshold, self.activation, self.f)
-        masked_weight = effective_mask.to(sparse_weight.device) * sparse_weight
+        masked_weight = (effective_mask.to(sparse_weight.device) * sparse_weight).contiguous()
         
         return F.conv2d(
             x, masked_weight, self.bias, 
@@ -165,18 +122,32 @@ class STRConvER(nn.Conv2d):
         temp[temp!=0] = 1
         return temp
 
+class STRConv1d(STRConvER):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, x):
+        # In case STR is not training for the hyperparameters given in the paper, change sparseWeight to self.sparseWeight if it is a problem of backprop.
+        # However, that should not be the case according to graph computation.
+        x = x.unsqueeze(-1).unsqueeze(-1)
+        sparseWeight = self.sparseFunction(self.weight, self.sparseThreshold, self.activation, self.f).to(self.weight.device)
+        x = F.conv2d(
+            x, sparseWeight, self.bias, self.stride
+        )
+        return x.squeeze()
+
 
 class ConvER(nn.Conv2d):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.activation = torch.relu
-        self.mask = torch.zeros_like(self.weight).bernoulli_(p=parser_args.er_sparse_init)
+        self.er_mask = torch.zeros_like(self.weight, device=self.weight.device).bernoulli_(p=parser_args.er_sparse_init)
         
         
     def forward(self, x):
         
-        sparseWeight = self.mask.to(self.weight.device) * self.weight
+        sparseWeight = self.er_mask.to(self.weight.device) * self.weight
         x = F.conv2d(
             x, sparseWeight, self.bias, self.stride, self.padding, self.dilation, self.groups
         )
@@ -186,17 +157,22 @@ class ConvER(nn.Conv2d):
         return torch.sign(x)* activation(torch.abs(x)-f(s))
     
     def set_er_mask(self, p):
-        self.mask = torch.zeros_like(self.weight).bernoulli_(p)
+        self.er_mask = torch.zeros_like(self.weight, device=self.weight.device).bernoulli_(p)
 
     def getSparsity(self, f=torch.sigmoid):
-        sparseWeight = self.mask.to(self.weight.device) * self.weight
-        temp = sparseWeight.detach().cpu()
+        sparseWeight = self.er_mask.to(self.weight.device) * self.weight
+        temp = sparseWeight.detach().float()
         temp[temp!=0] = 1
         return (100 - temp.mean().item()*100), temp.numel(), 0
     
+    def getMaskSparsity(self):
+        temp = self.er_mask.detach().float()
+        temp[temp!=0] = 1
+        return (100 - temp.mean().item()*100), temp.sum().item()
+    
     def getMask(self, f=torch.sigmoid):
-        sparseWeight = self.sparseFunction(self.weight, self.sparseThreshold,  self.activation, self.f)
-        temp = self.mask * sparseWeight.detach().cpu()
+        # sparseWeight = self.sparseFunction(self.weight, self.sparseThreshold,  self.activation, self.f)
+        temp = (self.er_mask * self.weight.detach()).float()
         temp[temp!=0] = 1
         return temp
 
@@ -260,12 +236,3 @@ class GMPConv(nn.Conv2d):
         )
 
         return x
-    
-# class MaskApply(torch.autograd.Function):
-#     @staticmethod
-#     def forward(ctx, weight, mask):
-#         return weight * mask
-
-#     @staticmethod
-#     def backward(ctx, grad_output):
-#         return grad_output, None

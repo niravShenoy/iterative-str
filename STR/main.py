@@ -5,6 +5,7 @@ import shutil
 import time
 import json
 import numpy as np
+import math
 
 import torch
 import torch.nn as nn
@@ -86,7 +87,8 @@ def main_worker(args):
         elif args.resnet_type == 'res18':
             model = resnet.ResNet18(num_classes=1000)
         else:
-            model = resnet18.ResNet50([3, 32, 32], num_classes=1000)
+            model = resnet18.ResNet50ImageNet(num_classes=1000)
+            print(model)
 
     if args.er_sparse_method == 'uniform':
         for n, m in model.named_modules():
@@ -291,6 +293,9 @@ def main_worker(args):
             lr_policy(epoch, iteration=None)
             cur_lr = get_lr(optimizer)
 
+            if str_iter == 0 and args.warmup_length > 0 and epoch == args.warmup_length - 1:
+                torch.save(model.state_dict(), "{}/model_{}_init.pt".format(ckpt_base_dir, args.name))
+
             # Gradual pruning in GMP experiments
             if args.conv_type == "GMPConv" and epoch >= args.init_prune_epoch and epoch <= args.final_prune_epoch:
                 total_prune_epochs = args.final_prune_epoch - args.init_prune_epoch + 1
@@ -314,11 +319,14 @@ def main_worker(args):
             validation_time.update((time.time() - start_validation) / 60)
 
             # remember best acc@1 and save checkpoint
-            is_best = acc1 > best_acc1
-            best_acc1 = max(acc1, best_acc1)
-            best_acc5 = max(acc5, best_acc5)
-            best_train_acc1 = max(train_acc1, best_train_acc1)
-            best_train_acc5 = max(train_acc5, best_train_acc5)
+            if epoch > (args.epochs * 0.85):
+                is_best = acc1 > best_acc1
+                best_acc1 = max(acc1, best_acc1)
+                best_acc5 = max(acc5, best_acc5)
+                best_train_acc1 = max(train_acc1, best_train_acc1)
+                best_train_acc5 = max(train_acc5, best_train_acc5)
+            else:
+                is_best = False
 
             save = ((epoch % args.save_every) == 0) and args.save_every > 0
 
@@ -352,7 +360,8 @@ def main_worker(args):
             if is_best or save or (str_iter == args.str_iterations - 1 and epoch == args.epochs - 1):
                 if is_best:
                     print(f"==> New best, saving at {ckpt_base_dir} / 'model_best_str_iter_{str_iter}.pth'")
-                    print(f"Accuracy: {acc1:.2f}, Sparsity: {total_sparsity:.2f}")
+
+                print(f"Saving... Accuracy: {acc1:.2f}, Sparsity: {total_sparsity:.2f}")
 
                 save_checkpoint(
                     {
@@ -375,26 +384,27 @@ def main_worker(args):
                 )
 
             writer.add_scalar("test/lr", cur_lr, (str_iter * (args.epochs - args.start_epoch) + epoch))
+            writer.add_scalar("test/weight_decay", weight_decay, (str_iter * (args.epochs - args.start_epoch) + epoch))
             end_epoch = time.time()
 
         # Saving the mask of the model at the end of each STR iteration
         mask_list = []
-        if args.conv_type == "STRConv" or args.conv_type == 'STRConvER' or args.conv_type == 'ConvER':
+        if args.conv_type == "STRConv" or args.conv_type == 'STRConvER':
             for n, m in model.named_modules():
-                if isinstance(m, (STRConv, STRConvER, ConvER)):
+                if isinstance(m, (STRConv, STRConvER)):
                     mask_list.append(m.getMask())
+        # Apply LRR if ConvER
+        elif args.conv_type == "ConvER" and str_iter < args.str_iterations - 1:
+            mask_list = learning_rate_rewinding(model, args.lrr_prune_rate)
         
         torch.save(mask_list, "{}/mask_{}_iter_{}.pt".format(ckpt_base_dir, args.name, str_iter))
 
-        # Reset weights from the initial model and applying the mask
-        model = apply_pruned_mask(model, mask_list, ckpt_base_dir)
-
-        # Reset the optimizer to the initial state
-        optimizer.load_state_dict(torch.load("{}/optimizer_{}.pt".format(ckpt_base_dir, args.name)))
-
-        # Updating the weight decay for the optimizer before the next STR iteration
-        weight_decay *= args.weight_decay_multiplier
-        optimizer.param_groups[0]['weight_decay'] = weight_decay
+        if str_iter < args.str_iterations - 1:
+            model = apply_pruned_mask(model, mask_list, ckpt_base_dir)
+            optimizer.load_state_dict(torch.load("{}/optimizer_{}.pt".format(ckpt_base_dir, args.name)))
+            # Updating the weight decay for the optimizer before the next STR iteration
+            weight_decay *= args.weight_decay_multiplier
+            optimizer.param_groups[0]['weight_decay'] = weight_decay
         
 
     write_result_to_csv(
@@ -451,20 +461,20 @@ def set_gpu(args, model):
 
 # Passing Mask List as a parameter, alternative could be to pass the directory and load the mask based on the iteration
 def apply_pruned_mask(model, mask_list, base_dir):
-
-    # If not LRR, load init model or model at rewind point; else only rewind LR schedule
+    # If not LRR, load model from rewind point (after warmup); else only rewind LR schedule
     if not args.lr_rewind:
-        original_dict = torch.load("{}/model_{}_init.pt".format(base_dir, args.name))
-        original_weights = dict(filter(lambda v: (v[0].endswith(('.weight', '.bias'))), original_dict.items()))
+        # Load weights from after warmup (rewind point)
+        rewind_dict = torch.load("{}/model_{}_init.pt".format(base_dir, args.name))
+        rewind_weights = dict(filter(lambda v: (v[0].endswith(('.weight', '.bias'))), rewind_dict.items()))
         model_dict = model.state_dict()
-        model_dict.update(original_weights)
+        model_dict.update(rewind_weights)
         model.load_state_dict(model_dict)
-
-    # Apply learned masks to the init model
+        print("Rewound weights to post-warmup checkpoint")
+    
+    # Apply learned masks to the model
     cnt = 0
     for _, m in model.named_modules():
-        if isinstance(m, (STRConvER)):
-            # m.sparseThreshold = args.sInit_value    # sInit does not have as big an effect as weight decay
+        if isinstance(m, (STRConvER, ConvER)):
             m.er_mask = mask_list[cnt]
             cnt += 1
 
@@ -480,6 +490,31 @@ def analyze_weights_sparsity(model):
 
     weight_square = sum(weight_squares)
     return weight_square
+
+def learning_rate_rewinding(model, prune_rate):
+    """
+    Performs per-layer magnitude pruning to create a new list of boolean masks.
+    Prunes (prune_rate * number of unmasked weights) parameters per layer
+    with the lowest absolute magnitude by updating the mask.
+    Uses ConvER.getMask() to retrieve the current mask.
+    """
+    mask_list = []
+    for n, m in model.named_modules():
+        if isinstance(m, ConvER):
+            device = m.weight.device
+            mask = m.er_mask.bool().to(device)
+            num_active = mask.sum().item()
+            intended_prune = math.ceil(prune_rate * num_active)
+            
+            if intended_prune >= num_active or num_active == 0:
+                new_mask = torch.zeros_like(mask, dtype=torch.bool, device=device)
+            else:
+                magnitudes = torch.abs(m.weight.data[mask])
+                threshold = torch.kthvalue(magnitudes, intended_prune)[0]
+                prune_mask = (torch.abs(m.weight.data) <= threshold) & mask
+                new_mask = mask.clone() & ~prune_mask
+            mask_list.append(new_mask.bool().to(device))  # Ensure boolean and correct device
+    return mask_list
 
 
 def resume(args, model, optimizer):

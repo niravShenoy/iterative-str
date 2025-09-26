@@ -3,58 +3,15 @@ import torch
 import tqdm
 import math
 import torchvision
+from torch.cuda.amp import autocast
 
 from utils.eval_utils import accuracy
-from utils.conv_type import STRConv, STRConvER
+from utils.conv_type import ConvER, STRConv, STRConvER
 from utils.logging import AverageMeter, ProgressMeter
 from args import args
 
 
 __all__ = ["train", "validate"]
-
-# def magnitude_death(mask, weight, prune_rate, num_nonzeros, num_zeros):
-#     num_remove = math.ceil(prune_rate * num_nonzeros)
-#     # num_retain = math.ceil(num_nonzeros - num_remove)  # [(1 - prune_rate) * num_nonzeros]
-
-#     if num_remove == 0.0:
-#         return weight.data != 0.0
-    
-#     k = math.ceil(num_zeros + num_remove)
-
-#     # x1, _ = torch.sort(torch.abs(weight.data[mask == 1.0]), descending=True) # Alternate logic to extract the top [(1 - prune_rate) * num_nonzeros] elements
-#     # threshold1 = x1[num_retain].item()
-
-#     x, _ = torch.sort(torch.abs(weight.data.view(-1)))      # Method used in GraNet implementation
-#     threshold = x[k-1].item()
-
-#     # assert threshold1 == threshold, f"Threshold mismatch {threshold1} != {threshold}"
-
-#     # Create a mask such that the indices of the top k elements are 1 and the rest are 0
-#     return (torch.abs(weight.data) > threshold).float()
-
-# def gradient_growth(mask, weight, num_pruned):
-#     grad = weight.grad
-#     masked = (mask == 0.0).float()
-#     grad = grad * masked.to(grad.device)
-#     x, _ = torch.sort(torch.abs(grad.view(-1)), descending=True)
-#     threshold = x[num_pruned].item()
-#     grad_mask = (torch.abs(grad) > threshold).float()
-#     grad_mask = grad_mask.to(mask.device)
-
-#     # If threshold is 0 (can occur in the ultra-sparse regime), logic to ensure that non-zero elements remain the same before and after prune and grow
-#     # Randomly select elements from the mask to regrow
-#     num_grown = grad_mask.sum().item()
-#     if num_pruned > num_grown:
-#         num_remain = int(num_pruned - num_grown)
-#         new_grad_mask = (mask == 0.0).float() * (grad_mask == 0.0).float()
-#         indices = torch.nonzero(new_grad_mask)
-#         shuffled_indices = indices[torch.randperm(indices.size(0))]
-#         regrow_indices = shuffled_indices[:num_remain]
-#         grad_mask[regrow_indices[:, 0], regrow_indices[:, 1], regrow_indices[:, 2], regrow_indices[:, 3]] = 1.0
-
-#     assert grad_mask.sum().item() == num_pruned, f"Number of elements in grad_mask {grad_mask.sum().item()} != {num_pruned}"
-        
-#     return grad_mask
 
 def pruning(model, args, prune_step):
     """
@@ -95,7 +52,7 @@ def pruning(model, args, prune_step):
     
     weight_abs = []
     for n, m in model.named_modules():
-        if isinstance(m, (STRConv, STRConvER)):
+        if isinstance(m, (STRConv, STRConvER, ConvER)):
             weight_abs.append(torch.abs(m.weight))
 
     all_scores = torch.cat([torch.flatten(x) for x in weight_abs])
@@ -106,7 +63,7 @@ def pruning(model, args, prune_step):
 
     total_size = 0
     for n, m in model.named_modules():
-        if isinstance(m, (STRConv, STRConvER)):
+        if isinstance(m, (STRConv, STRConvER, ConvER)):
             total_size += torch.nonzero(m.weight.data).size(0)
             zero = torch.tensor([0.]).to(m.weight.device)
             one = torch.tensor([1.]).to(m.weight.device)
@@ -116,109 +73,10 @@ def pruning(model, args, prune_step):
 
     sparse_size = 0
     for n, m in model.named_modules():
-        if isinstance(m, (STRConv, STRConvER)):
+        if isinstance(m, (STRConv, STRConvER, ConvER)):
             sparse_size += torch.nonzero(m.er_mask).size(0)
 
     print('% Pruned: {0}'.format((total_size - sparse_size) / total_size))
-
-# def truncate_weights(model, prune_rate):
-#     """
-#     Creates an updated mask based on the weights of the model using the Prune and Grow algorithm.
-
-#     Args:
-#         model (nn.Module): The model to truncate the weights of.
-#         args: Additional arguments.
-#         step: The current step.
-#         prune_rate (float): The rate at which to prune the weights.
-
-#     Returns:
-#         None
-#     """
-
-#     num_nonzeros = []
-#     num_zeros = []
-
-#     # Model statistics before Prune and Grow
-#     for n, m in model.named_modules():
-#         if isinstance(m, (STRConv, STRConvER)):
-#             num_nonzeros.append(m.mask.sum().item())
-#             num_zeros.append(m.mask.numel() - num_nonzeros[-1])
-
-#     # Prune
-#     layer = 0
-#     num_pruned = []
-#     updated_mask = []
-#     for n, m in model.named_modules():
-#         if isinstance(m, (STRConv, STRConvER)):
-#             mask = m.mask
-#             new_mask = magnitude_death(mask, m.weight, prune_rate, num_nonzeros[layer], num_zeros[layer])
-#             new_mask = new_mask.to(m.mask.device)
-#             num_pruned.append(int(num_nonzeros[layer] - new_mask.sum().item()))
-#             updated_mask.append(new_mask)
-#             m.mask = new_mask
-#             layer += 1
-
-#     # Grow
-#     layer = 0
-#     total_retained = 0.0
-#     total_params = 0.0
-#     for n, m in model.named_modules():
-#         if isinstance(m, (STRConv, STRConvER)):
-#             mask = m.mask
-#             assert torch.equal(mask, updated_mask[layer]), f"Mask mismatch {mask.sum().item()} != {updated_mask[layer].sum().item()}"
-
-#             new_mask = gradient_growth(mask, m.weight, num_pruned[layer])
-#             m.mask = new_mask.to(mask.device) + mask
-
-#             # Sanity Checks
-#             assert torch.all(m.mask <= 1.0), "Mask value greater than 1.0"
-#             # assert m.mask.sum().item() - updated_mask[layer].sum().item() == num_pruned[layer], f"Layer {layer}: Name:{n} -> Pruning and Regeneration mismatch. {m.mask.sum().item()} != {num_nonzeros[layer]}"
-
-#             print(f"{n}: Density: {m.mask.sum().item() / m.mask.numel()}")
-#             total_retained += m.mask.sum().item()
-#             total_params += m.mask.numel()
-#             layer += 1
-
-#     print(f"Overall Density: {total_retained / total_params}")
-
-# def magnitude_death(mask, sparse_weights, active_mask, prune_rate, num_nonzeros):
-#     """Prune weights that survive STR but have smallest magnitudes"""
-#     num_remove = math.ceil(prune_rate * num_nonzeros)
-#     if num_remove == 0 or num_nonzeros == 0:
-#         return mask.clone()
-    
-#     # Get magnitudes of active weights (non-zero after STR)
-#     active_magnitudes = torch.abs(sparse_weights[active_mask])
-#     sorted_mags, _ = torch.sort(active_magnitudes)
-#     threshold = sorted_mags[num_remove-1] if num_remove <= len(sorted_mags) else 0
-    
-#     # Create prune mask for active weights below threshold
-#     prune_mask = (torch.abs(sparse_weights) <= threshold) & active_mask
-#     new_mask = mask.clone()
-#     new_mask[prune_mask] = 0
-#     return new_mask
-
-# def gradient_growth(mask, weight, num_pruned):
-#     """Regrow weights with largest gradients while allowing gradient flow"""
-#     grad = weight.grad
-#     current_mask = mask.bool()
-    
-#     # Consider only masked weights for regrowth
-#     candidate_grads = grad[~current_mask]
-#     if candidate_grads.numel() == 0:
-#         return mask.clone(), None
-    
-#     # Find threshold for top gradients
-#     sorted_grads = torch.sort(torch.abs(candidate_grads), descending=True)[0]
-#     threshold_idx = min(num_pruned, len(sorted_grads)) - 1                                                                                                                                                                                                                                                                                                                                                                                                                             
-#     threshold = sorted_grads[threshold_idx] if threshold_idx >= 0 else 0
-    
-#     # Create regrowth mask
-#     grad_mask = (torch.abs(grad) >= threshold) & ~current_mask
-#     new_mask = mask.clone()
-#     new_mask[grad_mask] = 1
-    
-#     return new_mask, grad_mask
 
 def get_regrowth_candidates(layer):
     """Get valid regrowth candidates: non-ER, non-grown, STR-zeroed"""
@@ -404,7 +262,7 @@ def create_mask_visualization(layer):
 def log_layer_masks(writer, model, global_step):
     """Log all layer masks with multiple views"""
     for name, module in model.named_modules():
-        if isinstance(module, STRConvER):
+        if isinstance(module, (STRConvER, ConvER)):
             device = module.er_mask.device
             # Individual filter view
             vis, sparse_weights, vis_prune_regrow = create_mask_visualization(module)
@@ -427,7 +285,7 @@ def log_layer_masks(writer, model, global_step):
             
 def log_gradient_distributions(writer, model, global_step):
     for name, module in model.named_modules():
-        if isinstance(module, STRConvER):
+        if isinstance(module, (STRConvER, ConvER)):
             if module.weight.grad is None:
                 continue
             device = module.er_mask.device
@@ -448,7 +306,7 @@ def log_gradient_distributions(writer, model, global_step):
 def truncate_weights(model, prune_rate, writer, global_step=1):
     """Main neuroregeneration entry point"""
     for module in model.modules():
-        if not isinstance(module, STRConvER):
+        if not isinstance(module, (STRConvER, ConvER)):
             continue
 
         resolve_mask_conflicts(module)
@@ -465,89 +323,13 @@ def truncate_weights(model, prune_rate, writer, global_step=1):
 
         # Create and log visualization
         log_layer_masks(writer, model, global_step)
-        log_gradient_distributions(writer, model, global_step)
-
-# def perform_neuroregeneration(model, prune_rate, epsilon=1e-8):
-#     """
-#     Perform Neuroregeneration on the model. This function is used in the prune_and_grow method.
-
-#     Args:
-#         model (nn.Module): The model to perform neuroregeneration on.
-#         prune_rate (float): The rate at which to prune the weights.
-#         epsilon (float): A small value to prevent division by zero.
-
-#     Returns:
-#         None
-#     """
-#     total_active = 0
-#     total_params = 0
-    
-#     for name, module in model.named_modules():
-#         if not isinstance(module, (STRConv, STRConvER)):
-#             continue
-            
-#         # Compute STR-transformed weights
-#         sparse_weights = module.sparseFunction(
-#             module.weight,
-#             module.sparseThreshold,
-#             module.activation,
-#             module.f
-#         )
-        
-#         # Identify actually active weights (masked and surviving STR)
-#         active_mask = (module.mask == 1) & (sparse_weights != 0)
-#         num_active = active_mask.sum().item()
-        
-#         # Prune lowest magnitude active weights
-#         new_mask = magnitude_death(
-#             module.mask, sparse_weights, active_mask,
-#             prune_rate, num_active
-#         )
-#         num_pruned = int((module.mask.sum() - new_mask.sum()).item())
-        
-#         # Regrow highest gradient weights
-#         new_mask, grad_mask = gradient_growth(new_mask, module.weight, num_pruned)
-        
-#         # Reinitialize regenerated weights
-#         if grad_mask is not None and grad_mask.any():
-#             # Calculate average magnitude of current active weights
-#             current_active = sparse_weights * new_mask
-#             active_non_zero = current_active[current_active != 0]
-#             avg_mag = active_non_zero.abs().mean() if len(active_non_zero) > 0 else 0.01
-            
-#             # Initialize with gradient-aligned signs
-#             new_weights = module.weight.data[grad_mask]
-#             grad_signs = -torch.sign(module.weight.grad[grad_mask])
-            
-#             # Handle zero gradients randomly
-#             zero_grads = (grad_signs == 0)
-#             grad_signs[zero_grads] = torch.where(
-#                 torch.rand(zero_grads.sum().item()) > 0.5,
-#                 torch.ones_like(grad_signs[zero_grads]),
-#                 -torch.ones_like(grad_signs[zero_grads])
-#             )
-            
-#             with torch.no_grad():
-#                 module.weight.data[grad_mask] = grad_signs * avg_mag
-        
-#         # Update module mask
-#         module.mask = new_mask
-        
-#         # Track sparsity
-#         layer_active = new_mask.sum().item()
-#         layer_params = new_mask.numel()
-#         total_active += layer_active
-#         total_params += layer_params
-#         print(f"{name}: Density {layer_active/layer_params:.3f}")
-
-#     print(f"Global density: {total_active/total_params:.4f}")
-    
+        log_gradient_distributions(writer, model, global_step)    
     
 
 def log_mask_sparsity(model, writer, step, train_loader_len):
     # Log the mask sparsity
     for n, m in model.named_modules():
-        if isinstance(m, STRConvER):
+        if isinstance(m, (STRConvER, ConvER)):
             maskSparsity, _ = m.getMaskSparsity()
             writer.add_scalar("mask_sparsity/{}".format(n), maskSparsity, (step // train_loader_len))
 
@@ -576,7 +358,7 @@ def step(model, args, step, train_loader_len, decay_scheduler=None, writer=None)
             truncate_weights(model, prune_rate,writer=writer, global_step=step)
 
 
-def train(train_loader, model, criterion, optimizer, epoch, args, writer, prev_epochs=0, device='cpu'):
+def train(train_loader, model, criterion, optimizer, epoch, args, writer, prev_epochs=0):
     batch_time = AverageMeter("Time", ":6.3f")
     data_time = AverageMeter("Data", ":6.3f")
     losses = AverageMeter("Loss", ":.3f")
@@ -590,6 +372,9 @@ def train(train_loader, model, criterion, optimizer, epoch, args, writer, prev_e
 
     # switch to train mode
     model.train()
+
+    precision = torch.bfloat16
+    use_amp = True
 
     batch_size = train_loader.batch_size
     num_batches = len(train_loader)
@@ -605,10 +390,10 @@ def train(train_loader, model, criterion, optimizer, epoch, args, writer, prev_e
 
         target = target.cuda(args.gpu, non_blocking=True).long()
 
-        # compute output
-        output = model(images)
-
-        loss = criterion(output, target.view(-1))
+        with autocast(dtype=precision, enabled=use_amp):
+            # compute output
+            output = model(images)
+            loss = criterion(output, target.view(-1))
 
         # measure accuracy and record loss
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
@@ -651,6 +436,9 @@ def validate(val_loader, model, criterion, args, writer, epoch, prev_epochs=0):
     # switch to evaluate mode
     model.eval()
 
+    precision = torch.bfloat16
+    use_amp = True
+
     with torch.no_grad():
         end = time.time()
         for i, (images, target) in tqdm.tqdm(
@@ -661,10 +449,10 @@ def validate(val_loader, model, criterion, args, writer, epoch, prev_epochs=0):
 
             target = target.cuda(args.gpu, non_blocking=True).long()
 
-            # compute output
-            output = model(images)
-
-            loss = criterion(output, target.view(-1))
+            with autocast(dtype=precision, enabled=use_amp):
+                # compute output
+                output = model(images)
+                loss = criterion(output, target.view(-1))
 
             # measure accuracy and record loss
             acc1, acc5 = accuracy(output, target, topk=(1, 5))

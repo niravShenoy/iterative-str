@@ -4,21 +4,21 @@
 
 # ===== Dataset ===== #
 # data: /mnt/data/
-set: cifar10
-resnet_type: small-dense
+set: imagenet
+resnet_type: res50
 name: cifar10_resnet18_balanced_STR_Iter_LRR
 
 # ===== Learning Rate Policy ======== #
 optimizer: sgd
 lr: 0.1
-lr_policy: cosine_lr
-warmup_length: 5
+lr_policy: multistep_lr_imagenet
+warmup_length: 10
 
 # ===== Network training config ===== #
 str_iterations: 2
 epochs: 100
-weight_decay: 0.0004 # Change this according to reported numbers in appendix
-weight_decay_multiplier: 1.4
+weight_decay: 0.0003 # Change this according to reported numbers in appendix
+weight_decay_multiplier: 1.75
 momentum: 0.9
 batch_size: 256
 label_smoothing: 0.1
