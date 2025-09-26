@@ -153,7 +153,7 @@ def parse_arguments():
         "--lr-policy", default="constant_lr", help="Policy for the learning rate."
     )
     parser.add_argument(
-        "--multistep-lr-adjust", default=30, type=int, help="Interval to drop lr"
+        "--multistep-lr-adjust", default=60, type=int, help="Interval to drop lr"
     )
     parser.add_argument(
         "--multistep-lr-gamma", default=0.1, type=int, help="Multistep multiplier"
@@ -168,6 +168,12 @@ def parse_arguments():
         "--prune-rate",
         default=0.0,
         help="Amount of pruning to do during sparse training",
+        type=float,
+    )
+    parser.add_argument(
+        "--lrr-prune-rate",
+        default=0.2,
+        help="Amount of pruning for the LRR implementation of code (used with ConvER)",
         type=float,
     )
     parser.add_argument(

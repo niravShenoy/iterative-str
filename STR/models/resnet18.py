@@ -8,9 +8,11 @@ Reference:
 '''
 import torch
 import torch.nn as nn
+import torchvision.models as models
 import torch.nn.functional as F
 from utils.builder import get_builder
 from args import args
+from utils.conv_type import STRConv, STRConvER, ConvER, STRConv1d
 
 class BasicBlock(nn.Module):
     M = 2
@@ -169,11 +171,49 @@ def ResNet101(input_shape, num_classes, dense_classifier=False, pretrained=True)
 def ResNet152(input_shape, num_classes, dense_classifier=False, pretrained=True):
     return ResNet(get_builder(), Bottleneck, [3, 8, 36, 3], num_classes)
 
+def ResNet50ImageNet(num_classes=1000, mask_type="STRConvER"):
+    model = models.resnet50(num_classes=num_classes)
 
+    layers_to_replace = []
 
+    for name, layer in model.named_modules():
+        if "downsample" in name:
+            continue
+        if isinstance(layer, (nn.Linear, nn.Conv2d)):
+            layers_to_replace.append((name, layer))
 
-# test()
+    for name, layer in layers_to_replace:
+        parts = name.split(".")
+        parent_module = model
+        for part in parts[:-1]:
+            parent_module = getattr(parent_module, part)
 
+        if isinstance(layer, nn.Linear):
+            in_features = layer.in_features
+            out_features = layer.out_features
+            bias = layer.bias is not None
+
+            # For STRConvER, replace Linear with STRConv1d
+            conv_layer = STRConv1d(
+                in_channels=in_features,
+                out_channels=out_features,
+                kernel_size=1,
+                bias=bias
+            )
+            setattr(parent_module, parts[-1], conv_layer)
+        elif isinstance(layer, nn.Conv2d):
+            # For STRConvER, replace Conv2d with STRConvER
+            conv_mask_layer = STRConvER(
+                in_channels=layer.in_channels,
+                out_channels=layer.out_channels,
+                kernel_size=layer.kernel_size,
+                stride=layer.stride,
+                padding=layer.padding,
+                bias=layer.bias is not None,
+            )
+            setattr(parent_module, parts[-1], conv_mask_layer)
+    print(model)
+    return model
 
 class ResNetWidth(nn.Module):
     def __init__(self, builder, block, num_blocks, width, num_classes=10):

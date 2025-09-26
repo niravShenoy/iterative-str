@@ -12,6 +12,7 @@ def get_policy(name):
         "cosine_lr": cosine_lr,
         "efficientnet_lr": efficientnet_lr,
         "multistep_lr": multistep_lr,
+        "multistep_lr_imagenet": multistep_lr_imagenet,
     }
 
     return out_dict[name]
@@ -46,7 +47,6 @@ def cosine_lr(optimizer, args, **kwargs):
             lr = 0.5 * (1 + np.cos(np.pi * e / es)) * args.lr
 
         assign_learning_rate(optimizer, lr)
-
         return lr
 
     return _lr_adjuster
@@ -70,7 +70,25 @@ def multistep_lr(optimizer, args, **kwargs):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
 
     def _lr_adjuster(epoch, iteration):
-        lr = args.lr * (args.lr_gamma ** (epoch // args.lr_adjust))
+        if epoch < args.warmup_length:
+            lr = _warmup_lr(args.lr, args.warmup_length, epoch)
+        else:
+            lr = args.lr * (args.multistep_lr_gamma ** (epoch // args.lr_adjust))
+
+        assign_learning_rate(optimizer, lr)
+
+        return lr
+
+    return _lr_adjuster
+
+def multistep_lr_imagenet(optimizer, args, **kwargs):
+    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
+
+    def _lr_adjuster(epoch, iteration):
+        if epoch < args.warmup_length:
+            lr = args.lr * args.multistep_lr_gamma
+        else:
+            lr = args.lr * (args.multistep_lr_gamma ** ((epoch - args.warmup_length) // args.lr_adjust))
 
         assign_learning_rate(optimizer, lr)
 
