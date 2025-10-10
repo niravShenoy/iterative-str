@@ -1,6 +1,6 @@
 # Efficient Sparse Training: Combining Continuous Sparsification with Learning Rate Rewinding and Rewiring
 
-<p>The following code contains the implementation for iterative STR (iSTR) and study its stability and performance against baseline continuous sparsification and dynamic sparse training methods in the dense-to-sparse and sparse-to-sparse regimes. We then explore rewinding techniques and neuroregeneration and investigate whether it improves upon the performance of iSTR.</p>
+<p>The following code contains the implementation of my Master Thesis for the implementation of a novel pruning technique called iterative Soft Threshold Reparameterization (iSTR) and study its stability and performance against baseline continuous sparsification and dynamic sparse training methods in the dense-to-sparse and sparse-to-sparse regimes. We then explore rewinding techniques and neuroregeneration and investigate whether it improves upon the performance of iSTR.</p>
 
 ## Requirements
 - Python 3.6
